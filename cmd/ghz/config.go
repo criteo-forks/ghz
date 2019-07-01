@@ -47,7 +47,7 @@ type config struct {
 	QPS             uint               `json:"qps" toml:"qps" yaml:"qps"`
 	Z               Duration           `json:"duration" toml:"duration" yaml:"duration"`
 	X               Duration           `json:"max-duration" toml:"max-duration" yaml:"max-duration"`
-	Timeout         uint               `json:"timeout" toml:"timeout" yaml:"timeout" default:"20"`
+	Timeout         Duration           `json:"timeout" toml:"timeout" yaml:"timeout" default:"20s"`
 	Data            interface{}        `json:"data,omitempty" toml:"data,omitempty" yaml:"data,omitempty"`
 	DataPath        string             `json:"data-file" toml:"data-file" yaml:"data-file"`
 	BinData         []byte             `json:"-" toml:"-" yaml:"-"`
@@ -72,9 +72,10 @@ type config struct {
 func (c *config) UnmarshalJSON(data []byte) error {
 	type Alias config
 	aux := &struct {
-		Z  string `json:"z"`
-		X  string `json:"x"`
-		SI string `json:"si"`
+		Z       string `json:"z"`
+		X       string `json:"x"`
+		SI      string `json:"si"`
+		Timeout string `json:"timeout"`
 		*Alias
 	}{
 		Alias: (*Alias)(c),
@@ -90,12 +91,21 @@ func (c *config) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	zd, err := time.ParseDuration(aux.Z)
+	if aux.Z != "" {
+		zd, err := time.ParseDuration(aux.Z)
+		if err != nil {
+			return nil
+		}
+
+		c.Z = Duration(zd)
+	}
+
+	timeoutd, err := time.ParseDuration(aux.Timeout)
 	if err != nil {
 		return nil
 	}
 
-	c.Z = Duration(zd)
+	c.Timeout = Duration(timeoutd)
 
 	xd, err := time.ParseDuration(aux.X)
 	if err != nil {
@@ -119,14 +129,16 @@ func (c config) MarshalJSON() ([]byte, error) {
 	type Alias config
 	return json.Marshal(&struct {
 		*Alias
-		Z  string `json:"z"`
-		X  string `json:"x"`
-		SI string `json:"si"`
+		Z       string `json:"z"`
+		X       string `json:"x"`
+		SI      string `json:"si"`
+		Timeout string `json:"timeout"`
 	}{
-		Alias: (*Alias)(&c),
-		Z:     c.Z.String(),
-		X:     c.X.String(),
-		SI:    c.SI.String(),
+		Alias:   (*Alias)(&c),
+		Z:       c.Z.String(),
+		X:       c.X.String(),
+		SI:      c.SI.String(),
+		Timeout: c.Timeout.String(),
 	})
 }
 
