@@ -55,6 +55,8 @@ type Requester struct {
 
 	stopReason StopReason
 	lock       sync.Mutex
+
+	throttle <-chan time.Time
 }
 
 func newRequester(c *RunConfig) (*Requester, error) {
@@ -281,6 +283,10 @@ func (b *Requester) runWorkers() error {
 		return nil
 	}
 
+	if b.config.qps > 0 {
+		b.throttle = time.Tick(b.qpsTick)
+	}
+
 	errC := make(chan error, b.config.c)
 
 	// Ignore the case where b.N % b.C != 0.
@@ -304,6 +310,7 @@ func (b *Requester) runWorkers() error {
 			nReq:          nReqPerWorker,
 			workerID:      wID,
 			arrayJSONData: b.arrayJSONData,
+			throttle:      b.throttle,
 		}
 
 		n++ // increment connection counter
