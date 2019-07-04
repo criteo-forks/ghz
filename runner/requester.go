@@ -58,6 +58,7 @@ type Requester struct {
 	lock       sync.Mutex
 
 	throttle <-chan time.Time
+	ticker   *time.Ticker
 }
 
 func newRequester(c *RunConfig) (*Requester, error) {
@@ -277,6 +278,29 @@ func (b *Requester) newClientConn(withStatsHandler bool) (*grpc.ClientConn, erro
 	return grpc.DialContext(ctx, b.config.host, opts...)
 }
 
+func (b *Requester) startTicker() {
+	if b.config.qps2 <= 0 || b.config.qps2 == b.config.qps {
+		return
+	}
+
+	qpsDiff := (float64)(b.config.qps2 - b.config.qps)
+	testDur := b.config.z
+	stepDur := 2 * time.Second
+	stepDiff := (qpsDiff / (testDur.Seconds())) * stepDur.Seconds()
+
+	for qps := (float64)(b.config.qps); qps < (float64)(b.config.qps2); qps += stepDiff {
+		oldTicker := *b.ticker
+
+		b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
+		b.ticker = time.NewTicker(b.qpsTick)
+		b.throttle = b.ticker.C
+
+		time.Sleep(stepDur)
+
+		oldTicker.Stop()
+	}
+}
+
 func (b *Requester) runWorkers() error {
 	nReqPerWorker := b.config.n / b.config.c
 
@@ -285,7 +309,11 @@ func (b *Requester) runWorkers() error {
 	}
 
 	if b.config.qps > 0 {
-		b.throttle = time.Tick(b.qpsTick)
+		b.ticker = time.NewTicker(b.qpsTick)
+		b.throttle = b.ticker.C
+		if b.config.qps2 > 0 {
+			go b.startTicker()
+		}
 	}
 
 	errC := make(chan error, b.config.c)
@@ -311,7 +339,7 @@ func (b *Requester) runWorkers() error {
 			nReq:          nReqPerWorker,
 			workerID:      wID,
 			arrayJSONData: b.arrayJSONData,
-			throttle:      b.throttle,
+			throttle:      &b.throttle,
 		}
 
 		n++ // increment connection counter
