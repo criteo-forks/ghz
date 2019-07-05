@@ -26,7 +26,7 @@ type Worker struct {
 	nReq       int
 	workerID   string
 
-	throttle *<-chan time.Time
+	throttle <-chan time.Time
 
 	// cached messages only for binary
 	cachedMessages []*dynamic.Message
@@ -44,7 +44,7 @@ func (w *Worker) runWorker() error {
 			select {
 			case <-w.stopCh:
 				return nil
-			case <-(*w.throttle):
+			case <-w.throttle:
 				rErr := w.makeRequest()
 				err = multierr.Append(err, rErr)
 			}

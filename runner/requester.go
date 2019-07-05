@@ -58,7 +58,6 @@ type Requester struct {
 	lock       sync.Mutex
 
 	throttle <-chan time.Time
-	ticker   *time.Ticker
 }
 
 func newRequester(c *RunConfig) (*Requester, error) {
@@ -278,26 +277,34 @@ func (b *Requester) newClientConn(withStatsHandler bool) (*grpc.ClientConn, erro
 	return grpc.DialContext(ctx, b.config.host, opts...)
 }
 
-func (b *Requester) startTicker() {
-	if b.config.qps2 <= 0 || b.config.qps2 == b.config.qps {
-		return
-	}
-
+func (b *Requester) startTicker(output chan time.Time) {
 	qpsDiff := (float64)(b.config.qps2 - b.config.qps)
 	testDur := b.config.z
-	stepDur := 2 * time.Second
+	stepDur := 1 * time.Second
 	stepDiff := (qpsDiff / (testDur.Seconds())) * stepDur.Seconds()
 
-	for qps := (float64)(b.config.qps); qps < (float64)(b.config.qps2); qps += stepDiff {
-		oldTicker := *b.ticker
+	qps := (float64)(b.config.qps)
+	b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
+	ticker := time.NewTicker(b.qpsTick)
+	stepStart := time.Now()
+	count := 0
+	for true {
+		tick := <-ticker.C
+		count++
+		if tick.Before(stepStart.Add(stepDur)) {
+			output <- tick
+		} else {
+			stepStart = tick
+			ticker.Stop()
+			qps += stepDiff
+			b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
+			ticker = time.NewTicker(b.qpsTick)
 
-		b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
-		b.ticker = time.NewTicker(b.qpsTick)
-		b.throttle = b.ticker.C
+			output <- tick
 
-		time.Sleep(stepDur)
-
-		oldTicker.Stop()
+			println(tick.String(), " new qps: ", qps, " sent: ", count)
+			count = 0
+		}
 	}
 }
 
@@ -309,10 +316,12 @@ func (b *Requester) runWorkers() error {
 	}
 
 	if b.config.qps > 0 {
-		b.ticker = time.NewTicker(b.qpsTick)
-		b.throttle = b.ticker.C
-		if b.config.qps2 > 0 {
-			go b.startTicker()
+		if b.config.qps2 > 0 && b.config.qps != b.config.qps2 {
+			throttle := make(chan time.Time)
+			b.throttle = throttle
+			go b.startTicker(throttle)
+		} else {
+			b.throttle = time.Tick(b.qpsTick)
 		}
 	}
 
@@ -339,7 +348,7 @@ func (b *Requester) runWorkers() error {
 			nReq:          nReqPerWorker,
 			workerID:      wID,
 			arrayJSONData: b.arrayJSONData,
-			throttle:      &b.throttle,
+			throttle:      b.throttle,
 		}
 
 		n++ // increment connection counter
