@@ -210,6 +210,11 @@ func (r *Reporter) Finalize(stopReason StopReason, total time.Duration) *Report 
 	_ = json.Unmarshal(r.config.tags, &rep.Tags)
 
 	if len(r.details) > 0 {
+		//criteo-fix Sort is required for timeline calculations to work
+		sort.Slice(r.details, func(i, j int) bool {
+			return r.details[i].Timestamp.Before(r.details[j].Timestamp)
+		})
+
 		average := r.totalLatenciesSec / float64(r.totalCount)
 		rep.Average = time.Duration(average * float64(time.Second))
 

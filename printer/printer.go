@@ -567,9 +567,8 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 				<a name="timeline">
 					<h3>Timeline</h3>
 				</a>
-				<p>
-					<div class="js-timeline-container"></div>
-				</p>
+				<div class="js-timeline-legend-container"></div>
+				<div class="js-timeline-container"></div>
 			</div>
 		</div>
 
@@ -720,6 +719,25 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 		{{ end }}
 	];
 
+	const timelineLegendData = [
+		{
+			id: 1,
+			name: "QPS ok"
+		},
+		{
+			id: 2,
+			name: "QPS error"
+		},
+		{
+			id: 3,
+			name: "p50 (ms)"
+		},
+		{
+			id: 4,
+			name: "p99 (ms)"
+		}
+	];
+
 	const timelineChartData = {
 		data: [
 			{{ range .Timeline }}
@@ -733,10 +751,12 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 
 	function createTimelineChart() {
 		let timelineChart = britecharts.line(),
-			timelineTooltip = britecharts.tooltip(),
-			timelineContainer = d3.select('.js-timeline-container'),
-			containerWidth = timelineContainer.node() ? timelineContainer.node().getBoundingClientRect().width : false,
-			tooltipContainer;
+		timelineTooltip = britecharts.tooltip(),
+		timelineContainer = d3.select('.js-timeline-container'),
+		containerWidth = timelineContainer.node() ? timelineContainer.node().getBoundingClientRect().width : false,
+		tooltipContainer,
+		legendContainer,
+		timelineLegend = britecharts.legend();
 
 		timelineTooltip
 			.dateFormat(timelineTooltip.axisTimeCombinations.CUSTOM)
@@ -748,27 +768,32 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 			.margin({
 				left: 100,
 				right: 20,
-				top: 50,
+				top: 40,
 				bottom: 40
 			})
-		    .isAnimated(true)
-		    .grid('horizontal')
-		    .tooltipThreshold(400)
-		    .width(containerWidth)
-		    .height(400)
-		    .xAxisFormat(timelineChart.axisTimeCombinations.CUSTOM)
-		    .xAxisCustomFormat('%%H:%%M:%%S')
-		    .on('customMouseOver', timelineTooltip.show)
-		    .on('customMouseMove', timelineTooltip.update)
-		    .on('customMouseOut', timelineTooltip.hide);
+			.isAnimated(true)
+			.grid('horizontal')
+			.tooltipThreshold(400)
+			.width(containerWidth)
+			.height(400)
+			.xAxisFormat(timelineChart.axisTimeCombinations.CUSTOM)
+			.xAxisCustomFormat('%%H:%%M:%%S')
+			.on('customMouseOver', timelineTooltip.show)
+			.on('customMouseMove', timelineTooltip.update)
+			.on('customMouseOut', timelineTooltip.hide);
 
-		timelineChart
-			.ord
+		timelineLegend
+			.width(containerWidth)
+			.height(40)
+			.isHorizontal(true);
 
 		timelineContainer.datum(timelineChartData).call(timelineChart);
 
 		tooltipContainer = d3.select('.js-timeline-container .metadata-group .hover-marker');
 		tooltipContainer.datum([]).call(timelineTooltip);
+
+		legendContainer = d3.select('.js-timeline-legend-container');
+		legendContainer.datum(timelineLegendData).call(timelineLegend);
 	}
 
 	function createHorizontalBarChart() {

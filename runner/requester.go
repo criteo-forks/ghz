@@ -44,9 +44,10 @@ type Requester struct {
 
 	config *RunConfig
 
-	results chan *callResult
-	stopCh  chan bool
-	start   time.Time
+	results      chan *callResult
+	stopCh       chan bool
+	tickerStopCh chan bool
+	start        time.Time
 
 	qpsTick time.Duration
 
@@ -70,13 +71,14 @@ func newRequester(c *RunConfig) (*Requester, error) {
 	}
 
 	reqr := &Requester{
-		config:     c,
-		qpsTick:    qpsTick,
-		stopReason: ReasonNormalEnd,
-		results:    make(chan *callResult, min(c.c*1000, maxResult)),
-		stopCh:     make(chan bool, c.c),
-		conns:      make([]*grpc.ClientConn, 0, c.nConns),
-		stubs:      make([]grpcdynamic.Stub, 0, c.nConns),
+		config:       c,
+		qpsTick:      qpsTick,
+		stopReason:   ReasonNormalEnd,
+		results:      make(chan *callResult, min(c.c*1000, maxResult)),
+		stopCh:       make(chan bool, c.c),
+		tickerStopCh: make(chan bool, 1),
+		conns:        make([]*grpc.ClientConn, 0, c.nConns),
+		stubs:        make([]grpcdynamic.Stub, 0, c.nConns),
 	}
 
 	if c.proto != "" {
@@ -192,6 +194,8 @@ func (b *Requester) Stop(reason StopReason) {
 		b.stopCh <- true
 	}
 
+	b.tickerStopCh <- true
+
 	b.lock.Lock()
 	b.stopReason = reason
 	b.lock.Unlock()
@@ -281,29 +285,46 @@ func (b *Requester) startTicker(output chan time.Time) {
 	qpsDiff := (float64)(b.config.qps2 - b.config.qps)
 	testDur := b.config.z
 	stepDur := 1 * time.Second
-	stepDiff := (qpsDiff / (testDur.Seconds())) * stepDur.Seconds()
+	// stepDiff := (qpsDiff / (testDur.Seconds())) * stepDur.Seconds()
+	start := time.Now()
 
 	qps := (float64)(b.config.qps)
 	b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
 	ticker := time.NewTicker(b.qpsTick)
-	stepStart := time.Now()
+	stepStart := start
+	total := 0
 	count := 0
 	for true {
-		tick := <-ticker.C
-		count++
-		if tick.Before(stepStart.Add(stepDur)) {
-			output <- tick
-		} else {
-			stepStart = tick
-			ticker.Stop()
-			qps += stepDiff
-			b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
-			ticker = time.NewTicker(b.qpsTick)
+		select {
+		case tick := <-ticker.C:
+			{
+				count++
+				total++
+				if tick.Before(stepStart.Add(stepDur)) {
+					output <- tick
+				} else {
+					ticker.Stop()
 
-			output <- tick
+					stepStart = time.Now()
+					oldQps := qps
+					//qps += stepDiff
+					qps = (float64)(b.config.qps) + (qpsDiff/testDur.Seconds())*stepStart.Sub(start).Seconds()
+					b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
+					ticker = time.NewTicker(b.qpsTick)
 
-			println(tick.String(), " new qps: ", qps, " sent: ", count)
-			count = 0
+					output <- tick
+
+					diff := ((float64)(count)) - oldQps
+					println(tick.String(), " planned: ", fmt.Sprintf("%.2f", oldQps), " sent: ", count, " diff: ", fmt.Sprintf("%.1f", diff))
+					count = 0
+				}
+			}
+		case <-b.tickerStopCh:
+			{
+				ticker.Stop()
+				println("Stopping ticker. Total sent: ", total)
+				return
+			}
 		}
 	}
 }
