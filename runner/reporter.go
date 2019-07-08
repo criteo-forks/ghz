@@ -74,6 +74,7 @@ type Report struct {
 	LatencyDistribution []LatencyDistribution `json:"latencyDistribution"`
 	Histogram           []Bucket              `json:"histogram"`
 	Details             []ResultDetail        `json:"details"`
+	Timeline            []TimelineBucket      `json:"timeline"`
 
 	Tags map[string]string `json:"tags,omitempty"`
 }
@@ -114,6 +115,14 @@ type ResultDetail struct {
 	Latency   time.Duration `json:"latency"`
 	Error     string        `json:"error"`
 	Status    string        `json:"status"`
+}
+
+type TimelineBucket struct {
+	Timestamp time.Time `json:"timestamp"`
+	P50       float64   `json:"p50"`
+	P99       float64   `json:"p99"`
+	QPSOk     float64   `json:"qpsOk"`
+	QPSError  float64   `json:"qpsError`
 }
 
 func newReporter(results chan *callResult, c *RunConfig) *Reporter {
@@ -225,9 +234,70 @@ func (r *Reporter) Finalize(stopReason StopReason, total time.Duration) *Report 
 		}
 
 		rep.Details = r.details
+		rep.Timeline = calculateTimeline(r.details)
 	}
 
 	return rep
+}
+
+func calculateTimeline(details []ResultDetail) []TimelineBucket {
+	result := make([]TimelineBucket, 0)
+
+	bucketStart := details[0].Timestamp
+	bucketLen := time.Second
+	bucket := TimelineBucket{Timestamp: bucketStart}
+	bucketDetails := make([]ResultDetail, 0)
+
+	for _, res := range details {
+		if res.Timestamp.After(bucketStart.Add(bucketLen)) {
+			finalized := finalizeBucket(bucket, bucketDetails, bucketLen)
+			result = append(result, finalized)
+
+			bucketStart = bucketStart.Add(bucketLen)
+			bucket = TimelineBucket{Timestamp: bucketStart}
+			bucketDetails = make([]ResultDetail, 0)
+		}
+
+		if res.Status == "OK" {
+			bucket.QPSOk++
+		} else {
+			bucket.QPSError++
+		}
+		bucketDetails = append(bucketDetails, res)
+	}
+
+	finalized := finalizeBucket(bucket, bucketDetails, bucketLen)
+	result = append(result, finalized)
+
+	return result
+}
+
+func finalizeBucket(bucket TimelineBucket, details []ResultDetail, bucketLen time.Duration) TimelineBucket {
+	lats := make([]float64, 0, len(details))
+	for _, d := range details {
+		lats = append(lats, (float64)(d.Latency.Nanoseconds())/1e6)
+	}
+	sort.Float64s(lats)
+
+	result := TimelineBucket{
+		Timestamp: bucket.Timestamp,
+		QPSOk:     bucket.QPSOk / bucketLen.Seconds(),
+		QPSError:  bucket.QPSError / bucketLen.Seconds(),
+		P50:       latency(lats, 0.5),
+		P99:       latency(lats, 0.99),
+	}
+	return result
+}
+
+func latency(lats []float64, perc float64) float64 {
+	idx := (int)(perc * (float64)(len(lats)))
+	if idx > len(lats)-1 {
+		idx = len(lats) - 1
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	return lats[idx]
 }
 
 func latencies(latencies []float64) []LatencyDistribution {

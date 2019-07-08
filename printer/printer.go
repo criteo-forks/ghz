@@ -432,6 +432,14 @@ duration (ms),status,error{{ range $i, $v := .Details }}
               </span>
               <span>Summary</span>
             </a>
+		  </li>
+		  <li>
+            <a href="#timeline">
+              <span class="icon is-small">
+                <i class="fas fa-chart-line" aria-hidden="true"></i>
+              </span>
+              <span>Timeline</span>
+            </a>
           </li>
           <li>
             <a href="#histogram">
@@ -553,6 +561,18 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 			</div>
 	  </div>
 
+		<br />
+		<div class="container">
+			<div class="content">
+				<a name="timeline">
+					<h3>Timeline</h3>
+				</a>
+				<p>
+					<div class="js-timeline-container"></div>
+				</p>
+			</div>
+		</div>
+
 	  <br />
 		<div class="container">
 			<div class="content">
@@ -666,7 +686,8 @@ duration (ms),status,error{{ range $i, $v := .Details }}
               </a>
 
               <a class="button" id="dlJSON">JSON</a>
-              <a class="button" id="dlCSV">CSV</a>
+			  <a class="button" id="dlCSV">CSV</a>
+			  <a class="button" id="dlCSVtimeline">CSV timeline</a>
             </div>
           </div>
         </div>
@@ -691,12 +712,64 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 	const count = {{ .Count }};
 
 	const rawData = {{ jsonify .Details false }};
+	const timelineData = {{ jsonify .Timeline false }};
 
 	const data = [
 		{{ range .Histogram }}
 			{ name: {{ formatMark .Mark }}, value: {{ .Count }} },
 		{{ end }}
 	];
+
+	const timelineChartData = {
+		data: [
+			{{ range .Timeline }}
+				{ topicName: "QPS ok", name: 1, value: {{ .QPSOk }}, date: {{ jsonify .Timestamp false }} },
+				{ topicName: "QPS error", name: 2, value: {{ .QPSError }}, date: {{ jsonify .Timestamp false }} },
+				{ topicName: "p50 (ms)", name: 3, value: {{ .P50 }}, date: {{ jsonify .Timestamp false }} },
+				{ topicName: "p99 (ms)", name: 4, value: {{ .P99 }}, date: {{ jsonify .Timestamp false }} },
+			{{ end }}
+		]
+	};
+
+	function createTimelineChart() {
+		let timelineChart = britecharts.line(),
+			timelineTooltip = britecharts.tooltip(),
+			timelineContainer = d3.select('.js-timeline-container'),
+			containerWidth = timelineContainer.node() ? timelineContainer.node().getBoundingClientRect().width : false,
+			tooltipContainer;
+
+		timelineTooltip
+			.dateFormat(timelineTooltip.axisTimeCombinations.CUSTOM)
+			.dateCustomFormat('%%H:%%M:%%S')
+			.title('')
+			.tooltipOffset({x: 25, y: 10})
+
+		timelineChart
+			.margin({
+				left: 100,
+				right: 20,
+				top: 50,
+				bottom: 40
+			})
+		    .isAnimated(true)
+		    .grid('horizontal')
+		    .tooltipThreshold(400)
+		    .width(containerWidth)
+		    .height(400)
+		    .xAxisFormat(timelineChart.axisTimeCombinations.CUSTOM)
+		    .xAxisCustomFormat('%%H:%%M:%%S')
+		    .on('customMouseOver', timelineTooltip.show)
+		    .on('customMouseMove', timelineTooltip.update)
+		    .on('customMouseOut', timelineTooltip.hide);
+
+		timelineChart
+			.ord
+
+		timelineContainer.datum(timelineChartData).call(timelineChart);
+
+		tooltipContainer = d3.select('.js-timeline-container .metadata-group .hover-marker');
+		tooltipContainer.datum([]).call(timelineTooltip);
+	}
 
 	function createHorizontalBarChart() {
 		let barChart = britecharts.bar(),
@@ -772,11 +845,25 @@ duration (ms),status,error{{ range $i, $v := .Details }}
 		btn.setAttribute("download", filename);
 	}
 
+	function setCSVTimelineDownloadLink () {
+		var filename = "timeline.csv";
+		var btn = document.getElementById('dlCSVtimeline');
+		var csv = Papa.unparse(timelineData)
+		var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+		var url = URL.createObjectURL(blob);
+		btn.setAttribute("href", url);
+		btn.setAttribute("download", filename);
+	}
+
+	createTimelineChart();
+
 	createHorizontalBarChart();
 
 	setJSONDownloadLink();
 
 	setCSVDownloadLink();
+
+	setCSVTimelineDownloadLink();
 
 	</script>
 
