@@ -307,7 +307,6 @@ func (b *Requester) startTicker(output chan time.Time) {
 
 					stepStart = time.Now()
 					oldQps := qps
-					//qps += stepDiff
 					qps = (float64)(b.config.qps) + (qpsDiff/testDur.Seconds())*stepStart.Sub(start).Seconds()
 					b.qpsTick = time.Duration(1e6/(qps)) * time.Microsecond
 					ticker = time.NewTicker(b.qpsTick)
@@ -322,7 +321,6 @@ func (b *Requester) startTicker(output chan time.Time) {
 		case <-b.tickerStopCh:
 			{
 				ticker.Stop()
-				println("Stopping ticker. Total sent: ", total)
 				return
 			}
 		}

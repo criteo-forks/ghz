@@ -9,6 +9,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"go.uber.org/multierr"
+
 	"github.com/alecthomas/template"
 	"github.com/bojand/ghz/runner"
 )
@@ -30,49 +32,82 @@ func (rp *ReportPrinter) Print(format string) error {
 	if format == "" {
 		format = "summary"
 	}
+	formats := strings.Split(format, ",")
 
-	switch format {
-	case "summary", "csv":
-		outputTmpl := defaultTmpl
-		if format == "csv" {
-			outputTmpl = csvTmpl
-		}
-		buf := &bytes.Buffer{}
-		templ := template.Must(template.New("tmpl").Funcs(tmplFuncMap).Parse(outputTmpl))
-		if err := templ.Execute(buf, *rp.Report); err != nil {
-			return err
-		}
+	var finalErr error
 
-		return rp.printf(buf.String())
-	case "json", "pretty":
-		rep, err := json.Marshal(*rp.Report)
-		if err != nil {
-			return err
-		}
-
-		if format == "pretty" {
-			var out bytes.Buffer
-			err = json.Indent(&out, rep, "", "  ")
-			if err != nil {
-				return err
+	for _, f := range formats {
+		switch f {
+		case "summary", "csv", "summary-console":
+			outputTmpl := defaultTmpl
+			if f == "csv" {
+				outputTmpl = csvTmpl
 			}
-			rep = out.Bytes()
+			buf := &bytes.Buffer{}
+			templ := template.Must(template.New("tmpl").Funcs(tmplFuncMap).Parse(outputTmpl))
+			if err := templ.Execute(buf, *rp.Report); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+
+			if f == "summary-console" {
+				println(buf.String())
+				continue
+			}
+
+			if err := rp.printf(buf.String()); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+		case "json", "pretty":
+			rep, err := json.Marshal(*rp.Report)
+			if err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+
+			if f == "pretty" {
+				var out bytes.Buffer
+				err = json.Indent(&out, rep, "", "  ")
+				if err != nil {
+					finalErr = multierr.Append(finalErr, err)
+					continue
+				}
+				rep = out.Bytes()
+			}
+			if err := rp.printf(string(rep)); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+		case "html":
+			buf := &bytes.Buffer{}
+			templ := template.Must(template.New("tmpl").Funcs(tmplFuncMap).Parse(htmlTmpl))
+			if err := templ.Execute(buf, *rp.Report); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+			if err := rp.printf(buf.String()); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+		case "influx-summary":
+			if err := rp.printf(rp.getInfluxLine()); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+		case "influx-details":
+			if err := rp.printInfluxDetails(); err != nil {
+				finalErr = multierr.Append(finalErr, err)
+				continue
+			}
+		default:
+			err := fmt.Errorf("unknown format: %s", f)
+			finalErr = multierr.Append(finalErr, err)
+			continue
 		}
-		return rp.printf(string(rep))
-	case "html":
-		buf := &bytes.Buffer{}
-		templ := template.Must(template.New("tmpl").Funcs(tmplFuncMap).Parse(htmlTmpl))
-		if err := templ.Execute(buf, *rp.Report); err != nil {
-			return err
-		}
-		return rp.printf(buf.String())
-	case "influx-summary":
-		return rp.printf(rp.getInfluxLine())
-	case "influx-details":
-		return rp.printInfluxDetails()
-	default:
-		return fmt.Errorf("unknown format: %s", format)
 	}
+
+	return finalErr
 }
 
 func (rp *ReportPrinter) getInfluxLine() string {
